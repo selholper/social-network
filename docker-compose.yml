@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  # PostgreSQL база данных
+  postgres:
+    image: postgres:15
+    container_name: social_network_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: social_network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - social_network
+
+  # Tarantool для кеширования
+  tarantool:
+    image: tarantool/tarantool:2.11
+    container_name: social_network_tarantool
+    environment:
+      TARANTOOL_USER_NAME: admin
+      TARANTOOL_USER_PASSWORD: password
+    volumes:
+      - tarantool_data:/var/lib/tarantool
+      - ./tarantool_config/init.lua:/opt/tarantool/init.lua
+    ports:
+      - "3301:3301"
+    command: tarantool /opt/tarantool/init.lua
+    healthcheck:
+      test: ["CMD", "tarantool", "-e", "box.info.server.uuid"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - social_network
+
+  # FastAPI приложение
+  app:
+    build: .
+    container_name: social_network_app
+    environment:
+      # PostgreSQL
+      POSTGRES_SERVER: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: social_network
+      
+      # Tarantool
+      TARANTOOL_HOST: tarantool
+      TARANTOOL_PORT: 3301
+      TARANTOOL_USER: admin
+      TARANTOOL_PASSWORD: password
+      
+      # Security
+      SECRET_KEY: your-super-secret-key-change-in-production
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      
+      # Application
+      API_V1_STR: /api/v1
+      PROJECT_NAME: Social Network API
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tarantool:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app:ro  # Для разработки - монтируем код
+    networks:
+      - social_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  tarantool_data:
+    driver: local
+
+networks:
+  social_network:
+    driver: bridge
